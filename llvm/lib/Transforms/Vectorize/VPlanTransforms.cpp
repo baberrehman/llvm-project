@@ -6621,8 +6621,7 @@ void VPlanTransforms::makeMemOpWideningDecisions(
   }
 }
 
-void VPlanTransforms::makeScalarizationDecisions(
-    VPlan &Plan, VFRange &Range, VPRecipeBuilder &RecipeBuilder) {
+void VPlanTransforms::makeScalarizationDecisions(VPlan &Plan, VFRange &Range) {
   if (LoopVectorizationPlanner::getDecisionAndClampRange(
           [&](ElementCount VF) { return VF.isScalar(); }, Range))
     return;
@@ -6676,7 +6675,6 @@ void VPlanTransforms::makeScalarizationDecisions(
                                   *VPI, *VPI, VPI->getDebugLoc());
         Recipe->insertBefore(VPI);
         VPI->replaceAllUsesWith(Recipe);
-        RecipeBuilder.setRecipe(I, Recipe);
         VPI->eraseFromParent();
         continue;
       }
