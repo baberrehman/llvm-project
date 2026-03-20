@@ -308,6 +308,10 @@ void RNBRemote::CreatePacketTable() {
   // `MultiMemRead` as an `M` packet.
   t.push_back(Packet(multi_mem_read, &RNBRemote::HandlePacket_MultiMemRead,
                      NULL, "MultiMemRead", "Read multiple memory addresses"));
+  // Same ordering concern: `MultiBreakpoint` must come before the `M` packet.
+  t.push_back(Packet(multi_breakpoint, &RNBRemote::HandlePacket_MultiBreakpoint,
+                     NULL, "MultiBreakpoint",
+                     "Set/remove multiple breakpoints at once"));
   t.push_back(Packet(write_memory, &RNBRemote::HandlePacket_M, NULL, "M",
                      "Write memory"));
   t.push_back(Packet(write_register, &RNBRemote::HandlePacket_P, NULL, "P",
@@ -3275,6 +3279,61 @@ rnb_err_t RNBRemote::HandlePacket_MultiMemRead(const char *p) {
   return SendPacket(reply_stream.str());
 }
 
+rnb_err_t RNBRemote::HandlePacket_MultiBreakpoint(const char *p) {
+  const std::string_view packet_name("MultiBreakpoint:");
+  std::string_view packet(p);
+
+  if (!starts_with(packet, packet_name))
+    return HandlePacket_ILLFORMED(__FILE__, __LINE__, p,
+                                  "Invalid MultiBreakpoint packet prefix");
+
+  packet.remove_prefix(packet_name.size());
+
+  JSONParser parser(packet.cbegin());
+  JSONValue::SP parsed = parser.ParseJSONValue();
+  if (!parsed || parsed->GetKind() != JSONValue::Kind::Array) {
+    return HandlePacket_ILLFORMED(
+        __FILE__, __LINE__, p, "MultiBreakpoint did not contain a JSON array");
+  }
+
+  auto *request_array = static_cast<JSONArray *>(parsed.get());
+  std::vector<std::string> requests;
+  requests.reserve(request_array->GetNumElements());
+  for (JSONValue::SP value : request_array->Elements()) {
+    if (!value || value->GetKind() != JSONValue::Kind::String)
+      return HandlePacket_ILLFORMED(__FILE__, __LINE__, p,
+                                    "MultiBreakpoint had a non-string entry");
+    auto *request_str = static_cast<JSONString *>(value.get());
+    requests.push_back(request_str->GetData());
+  }
+
+  JSONArray reply_array;
+  for (const std::string &request : requests) {
+    BreakpointResult result = ExecuteBreakpointRequest(request.c_str());
+    std::string reply_str;
+    switch (result.kind) {
+    case BreakpointResult::Kind::OK:
+      reply_str = "OK";
+      break;
+    case BreakpointResult::Kind::Error: {
+      char error_str[8];
+      snprintf(error_str, sizeof(error_str), "E%02x", result.error_code);
+      reply_str = error_str;
+      break;
+    }
+    case BreakpointResult::Kind::IllFormed:
+    case BreakpointResult::Kind::Unimplemented:
+      reply_str = "E03";
+      break;
+    }
+    reply_array.AppendObject(std::make_shared<JSONString>(reply_str));
+  }
+
+  std::ostringstream reply_stream;
+  reply_array.Write(reply_stream);
+  return SendPacket(reply_stream.str());
+}
+
 // Read memory, sent it up as binary data.
 // Usage:  xADDR,LEN
 // ADDR and LEN are both base 16.
@@ -3629,6 +3688,7 @@ rnb_err_t RNBRemote::HandlePacket_qSupported(const char *p) {
     reply << "memory-tagging+;";
 
   reply << "MultiMemRead+;";
+  reply << "MultiBreakpoint+;";
   return SendPacket(reply.str().c_str());
 }
 
