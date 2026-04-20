@@ -1355,6 +1355,9 @@ public:
   /// \return The width of the smallest vector register type.
   LLVM_ABI unsigned getMinVectorRegisterBitWidth() const;
 
+  /// \return The maximum VF configured for target.
+  std::optional<ElementCount> getMaxScalableVF(unsigned MaxWidthInBits) const;
+
   /// \return The maximum value of vscale if the target specifies an
   ///  architectural maximum vector length, and std::nullopt otherwise.
   LLVM_ABI std::optional<unsigned> getMaxVScale() const;

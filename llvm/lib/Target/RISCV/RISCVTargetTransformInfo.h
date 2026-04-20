@@ -92,6 +92,9 @@ public:
   getIntImmCostIntrin(Intrinsic::ID IID, unsigned Idx, const APInt &Imm,
                       Type *Ty, TTI::TargetCostKind CostKind) const override;
 
+  std::optional<ElementCount>
+  getMaxScalableVF(unsigned MaxWidthInBits) const override;
+
   /// \name EVL Support for predicated vectorization.
   /// Whether the target supports the %evl parameter of VP intrinsic efficiently
   /// in hardware. (see LLVM Language Reference - "Vector Predication
