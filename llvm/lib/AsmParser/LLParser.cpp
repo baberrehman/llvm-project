@@ -14,6 +14,7 @@
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/AsmParser/LLToken.h"
@@ -4246,6 +4247,27 @@ BasicBlock *LLParser::PerFunctionState::defineBB(const std::string &Name,
 // Constants.
 //===----------------------------------------------------------------------===//
 
+/// True when \p P is the spelling of a vector type (`4 x i32` or
+/// `vscale x 4 x i32`). Used to tell a repeated vector type apart from a
+/// constant-vector element, which starts with an element type.
+static bool startsVectorType(const char *P) {
+  if (!P || *P == '\0')
+    return false;
+  if (StringRef(P).starts_with("vscale") && !isAlnum(P[6]) && P[6] != '_')
+    P += 6;
+  else {
+    if (*P == '+' || *P == '-')
+      ++P;
+    if (!isDigit(*P))
+      return false;
+    while (isDigit(*P))
+      ++P;
+  }
+  while (isSpace(*P))
+    ++P;
+  return *P == 'x' && !isAlnum(P[1]) && P[1] != '_';
+}
+
 /// parseValID - parse an abstract value that doesn't necessarily have a
 /// type implied.  For example, if we parse "4" we don't know what integer type
 /// it has.  The value will later be combined with its type and checked for
@@ -4348,6 +4370,16 @@ bool LLParser::parseValID(ValID &ID, PerFunctionState *PFS, Type *ExpectedTy) {
     // ValID ::= '<' '{' ConstVector '}' '>' --> Packed Struct.
     Lex.Lex();
     bool isPackedStruct = EatIfPresent(lltok::lbrace);
+
+    // `<2 x i16> <i16 1, i16 2>` repeats the vector type where a constant
+    // vector belongs. The element parser would report "expected type" on the
+    // element count, which describes the opposite problem. See PR29043.
+    if (!isPackedStruct &&
+        (Lex.getKind() == lltok::APSInt || Lex.getKind() == lltok::kw_vscale) &&
+        startsVectorType(Lex.getLoc().getPointer()))
+      return error(Lex.getLoc(),
+                   "unexpected vector type in constant; elements are written "
+                   "'<type value, ...>'");
 
     SmallVector<Constant*, 16> Elts;
     LocTy FirstEltLoc = Lex.getLoc();
